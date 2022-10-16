@@ -9,6 +9,7 @@ output: html_document
 library(tidyverse)
 library(ggridges)
 library(patchwork)
+library(lubridate)
 library(p8105.datasets)
 
 knitr::opts_chunk$set(
@@ -31,7 +32,7 @@ scale_fill_discrete = scale_fill_viridis_d
 ```
 
 
-###Problem 1
+### Problem 1
 
 This code chunk will load  and read the data from the p8105 datasets. 
 
@@ -94,5 +95,167 @@ instacart %>%
   knitr::kable(digits = 2)
 ```
 
-###Problem 2
+### Problem 2
 
+The code below loads, reads, and cleans the accel dataset by creating useful variable names, creates a variable that tells us whether the day the data was collected was a weekend or weekday, and transposes the data from wide format to long format by collapsing the repeated columns of activity into one column and gives the activity count for each activity number in the following column. 
+
+```{r tidy_accel}
+accel_tidied = 
+  read_csv("./data/accel_data.csv") %>%
+  janitor::clean_names() %>% 
+  mutate(
+    day_type = ifelse(day == "Saturday" | day == "Sunday", "Weekend", "Weekday"),
+    day = factor(day, levels = c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"))
+    ) %>%
+  pivot_longer(
+    cols = activity_1:activity_1440,
+    names_to = "activity_number",
+    values_to = "activity_count",
+    names_prefix = "activity.",
+  )
+```
+This dataset contains `r nrow(accel_tidied)` observations with `r ncol(accel_tidied)` variables. The variables in this data set include `r names(accel_tidied)`. 
+
+The code below shows how traditional accelerometer data is typically reported- total activity over the day by summing all the activity counts per day to create a daily total and creates a resulting table. 
+
+```{r accel_daily}
+  accel_daily_total = accel_tidied %>% 
+  group_by(week, day) %>% 
+  summarize(total_daily_activity = sum(activity_count)) %>%
+  pivot_wider(
+    names_from = day,
+    values_from = total_daily_activity
+  ) %>% 
+  knitr::kable(digits = 1)
+accel_daily_total
+```
+
+This table shows the sum of activity count per each day of the week reported by the accelerometer. It appears that the study subject engaged in far less physical activity in Saturday of Week 4 and 5 in comparison to the other days. There is no apparent trend on the subject's physical activity  based on the table.
+
+
+The codechunk belows creates a single panel plot showing the 24-hour activity time course for the subject each day and uses color to indicate each day of the week. 
+
+```{r accel_plot}
+accel_tidied %>% 
+  mutate(activity_number = as.numeric(activity_number)) %>% 
+  group_by(day, activity_number) %>% 
+  summarize(avg_value = mean(activity_count)) %>% 
+  ggplot(aes(x = activity_number, y = avg_value, color = day)) +
+  geom_smooth() +
+  scale_x_continuous(
+    breaks = (1:24)*60 + 1,
+    labels = c(1:24),
+    name = "Time Measured as Hour of the Day (1st-24th)"
+  ) + 
+  labs(
+    title = "24-Hour Activity Time Courses for Each Day of the Week",
+    x = "Hours (activity number)",
+    y = "Average activity counts",
+    color = "Day of the Week"
+  )
+```
+
+The subject shows 2 peaks (maximum) in physical activity between the 10th and 11th hour on Sunday and on the 21st hour on Friday. 
+
+
+### Problem 3
+
+The following code chunk cleans the data and ensures that they are 
+
+```{r noaa_clean}
+data("ny_noaa")
+ny_noaa = ny_noaa %>%
+  janitor::clean_names() %>% 
+  separate(date, c("year", "month", "day"), sep = "-") %>% 
+  mutate(tmax = as.double(tmax) / 10, 
+         tmin = as.double(tmin) / 10, 
+         prcp = prcp / 10,
+         month = month.name[as.integer(month)], 
+         year = as.integer(year))
+```
+The ny_noaa datasetcontains `r nrow(ny_noaa)` observations with `r ncol(ny_noaa)` variables.  The variables in this data set include `r names(ny_noaa)`. The data collected spans from 1981 until 2010. There are many observations with missing data, but that makes sense since each weather station only collects a subset of these variables. 
+
+```{r noaa_snow}
+ny_noaa %>%
+  group_by(snow) %>%
+  count(snow)
+```
+
+For snowfall, the most commonly observed value is 0, which makes sense since it isn't snowing in NY most days, especially during the spring, summer, and fall. 
+
+The following code makes a two-panel plot that shows the average maximum temperature in January and July for each station across the years. 
+
+```{r average daily temp plot in january and july, dpi = 300, fig.align = "center", fig.retina = 1, fig.asp = .6, out.width = "100%"}
+ny_noaa %>% 
+  filter(month %in% c("January", "July")) %>% 
+  group_by(year, month) %>% 
+  summarize(avg_temp = mean(tmax, na.rm = TRUE)) %>% 
+  ggplot(aes(x = year, y = avg_temp)) + 
+    geom_line(color = "#7496D2", size = 1) + 
+  facet_grid(~ month, 
+             scales = "free") + 
+  labs(title = "Figure 4: Average maximum temperature (°C) in January and July, 1981-2010", 
+       x = "Year", 
+       y = "Average Daily Temperature (°C)") +
+  theme(axis.text.x = element_text(angle = 45,
+                                   vjust = 0.4), 
+        strip.background = element_rect(fill = "black"), 
+        strip.text = element_text(color = "white", 
+                                  face = "bold"))
+```
+
+The max temperature for January and July varies by stations each year. The max temperature in January is consistently lower than the max temperature in July.There doesn't seem to be a consistent trend for both months. 
+
+This code makes a two panel plot that shows the max temperature vs the minimum temperature recorded for the full dataset. A scatterplot is not the best option since there are too many observations in the dataset, so we create a hexagon density plot.  It also creates a a plot showing the distribution of snowfall values greater than 0 and less than 100 separately by year. 
+
+```{r snow and temperature plot, dpi = 300, out.width = "100%", fig.asp = .5, fig.align = "center", fig.height = 6}
+temp_hex = ny_noaa %>%
+  filter(!is.na(tmin),
+         !is.na(tmax)) %>%
+  ggplot(aes(x = tmin, y = tmax)) +
+    geom_hex() + 
+    viridis::scale_fill_viridis(name = "", 
+                                option = "plasma") + 
+    theme(legend.position = "bottom",  
+          legend.key.height = unit(0.1, "in"), 
+          legend.key.width = unit(0.5, "in"),
+          plot.title = element_text(size = 7)) + 
+    labs(title = "Hexagon density plot of daily minimum and maximum temperature (°C)",
+         x = "Minimum Temperature (°C)", 
+         y = "Maximum Temperature (°C)") + 
+    scale_y_continuous(position = "left")
+    theme(axis.text.x = element_text(angle = 45,
+                                   vjust = 0.4), 
+        strip.background = element_rect(fill = "black"), 
+        strip.text = element_text(color = "white", 
+                                  face = "bold"))
+snow_density = ny_noaa %>%
+  filter(snow > 0 & snow < 100) %>%
+  mutate(year = as.factor(year)) %>%
+  mutate(year_cat = fct_collapse(year, 
+                                 "1981-85" = c("1981", "1982", "1983", "1984", "1985"), 
+                                 "1986-90" = c("1986", "1987", "1988", "1989", "1990"), 
+                                 "1991-95" = c("1991", "1992", "1993", "1994", "1995"), 
+                                 "1996-00" = c("1996", "1997", "1998", "1999", "2000"), 
+                                 "2001-05" = c("2001", "2002", "2003", "2004", "2005"), 
+                                 "2006-10" = c("2006", "2007", "2008", "2009", "2010"))) %>% 
+  ggplot(aes(x = snow, fill = year_cat, color = year_cat)) +
+  geom_density(alpha = 0.01) +
+    viridis::scale_fill_viridis(name = "Years", 
+                                discrete = TRUE) + 
+    viridis::scale_color_viridis(name = "Years",
+                                 discrete = TRUE, 
+                                 option = "viridis") + 
+    labs(title = "Density plot of snowfall (mm), 1981-2010",
+         x = "Snowfall (mm)", 
+         y = "Density") + 
+    theme(legend.position = "bottom", 
+          legend.direction = "horizontal", 
+          legend.key.size = unit(0.1, "in"), 
+          legend.text = element_text(size = 6),
+          plot.title = element_text(size = 7))
+snow_temp_plot <- snow_density + temp_hex
+wrap_elements(snow_temp_plot) + ggtitle("Figure 5: Density and hexagon plots")
+```
+
+The snowfall was collapsed into 5 year intervals. From this we see that an average of 25mm of snow occurs the most often through the years of 1981-2010. 
